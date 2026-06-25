@@ -13,10 +13,18 @@ public:
 		std::string name;
 		std::chrono::steady_clock::time_point startTime; // Точка времени запуска
 	};
+	struct TaskData {
+		std::vector<std::string> tasks;
+		std::vector<Process> activeProcesses;
+	};
 	std::vector<std::string> Tasks;
 	std::vector<Process> Tasks_active;
 	MainF();
 	std::string BstrToUtf8(BSTR bstr);
 	void CheckNameProcess(std::string Name, DWORD id, int type);
+	void WriteFile();
+	TaskData ReadFile();
+	std::string GetExePath();
+	std::string FormatDuration(const std::chrono::steady_clock::time_point& startTime);
 };
 
