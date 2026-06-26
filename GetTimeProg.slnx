@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="GetTimeProg.vcxproj" />
+  <Project Path="GetTimeProg.vcxproj" Id="1f1417ea-01a2-452a-8fc8-a3f1a5d7ca68" />
 </Solution>
