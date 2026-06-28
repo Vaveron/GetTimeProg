@@ -4,6 +4,12 @@
 #include "MainF.h"
 
 #pragma comment(lib, "advapi32.lib")
+// Добавь в начало main.cpp (после #include)
+#ifdef NDEBUG
+    #pragma comment(lib, "wbemuuid.lib")
+    #pragma comment(lib, "ole32.lib")
+    #pragma comment(lib, "oleaut32.lib")
+#endif
 
 // ===== ИСПРАВЛЕНО: Используем массив для избежания проблем с const =====
 wchar_t g_szServiceName[] = L"GetTimeProg";           // Внутреннее имя
@@ -20,7 +26,7 @@ VOID SvcInit(DWORD, LPTSTR*);
 VOID ReportSvcStatus(DWORD, DWORD, DWORD);
 VOID SvcInstall();
 VOID SvcUninstall();
-
+/* ВОТ НАХУЙ ЕЕ ОНА МНЕ ОШИБКУ ДАЕТ ПРИ УСТАНОВКИ СЛУЖБЫ
 // --- Функция для записи логов (добавлена) ---
 void WriteLog(const char* format, ...) {
     // Создаём папку для логов, если её нет
@@ -52,7 +58,7 @@ void WriteLog(const char* format, ...) {
         CloseHandle(hFile);
     }
 }
-
+*/
 // --- Точка входа ---
 int __cdecl _tmain(int argc, TCHAR* argv[])
 {
@@ -70,7 +76,7 @@ int __cdecl _tmain(int argc, TCHAR* argv[])
     }
     if (argc > 1 && lstrcmpi(argv[1], TEXT("debug")) == 0)
     {
-        WriteLog("=== ЗАПУСК В РЕЖИМЕ ОТЛАДКИ ===");
+        //WriteLog("=== ЗАПУСК В РЕЖИМЕ ОТЛАДКИ ===");
         SvcInit(argc, argv);
         return 0;
     }
@@ -87,7 +93,7 @@ int __cdecl _tmain(int argc, TCHAR* argv[])
     if (!StartServiceCtrlDispatcher(DispatchTable))
     {
         DWORD dwError = GetLastError();
-        WriteLog("ОШИБКА StartServiceCtrlDispatcher: %d", dwError);
+        //WriteLog("ОШИБКА StartServiceCtrlDispatcher: %d", dwError);
         return dwError;
     }
     return 0;
@@ -96,13 +102,13 @@ int __cdecl _tmain(int argc, TCHAR* argv[])
 // --- Основная функция службы ---
 VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
 {
-    WriteLog("SvcMain: Запуск");
+    //WriteLog("SvcMain: Запуск");
 
     // ===== ИСПРАВЛЕНО: Регистрируем обработчик =====
     gSvcStatusHandle = RegisterServiceCtrlHandler(g_szServiceName, SvcCtrlHandler);
     if (!gSvcStatusHandle)
     {
-        WriteLog("SvcMain: Ошибка RegisterServiceCtrlHandler: %d", GetLastError());
+        //WriteLog("SvcMain: Ошибка RegisterServiceCtrlHandler: %d", GetLastError());
         return;
     }
 
@@ -116,220 +122,269 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
 // --- Инициализация и основная логика службы ---
 VOID SvcInit(DWORD dwArgc, LPTSTR* lpszArgv)
 {
-    WriteLog("SvcInit: Начало инициализации");
+    //WriteLog("SvcInit: Начало инициализации");
 
     // Создаём событие для сигнала остановки.
     ghSvcStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
     if (ghSvcStopEvent == NULL)
     {
         DWORD dwError = GetLastError();
-        WriteLog("SvcInit: Ошибка CreateEvent: %d", dwError);
+        //WriteLog("SvcInit: Ошибка CreateEvent: %d", dwError);
         ReportSvcStatus(SERVICE_STOPPED, dwError, 0);
         return;
     }
 
     // Сообщаем, что служба успешно запущена.
     ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
-    WriteLog("SvcInit: Служба запущена успешно");
+    //WriteLog("SvcInit: Служба запущена успешно");
 
     // *** ЗДЕСЬ РАЗМЕЩАЕТСЯ ОСНОВНАЯ ЛОГИКА ВАШЕЙ ПРОГРАММЫ ***
     try {
         // Создаём экземпляр вашего класса
-        MainF mainf;
+        MainF mainf(ghSvcStopEvent);
+        WaitForSingleObject(ghSvcStopEvent, INFINITE);
 
-        WriteLog("SvcInit: Запуск MainF");
-
-        WriteLog("SvcInit: Получен сигнал остановки");
+        //WriteLog("SvcInit: Запуск MainF");
+        //WriteLog("SvcInit: Получен сигнал остановки");
     }
     catch (...) {
-        WriteLog("SvcInit: Исключение в основной логике");
+        //WriteLog("SvcInit: Исключение в основной логике");
+    }
+    // Закрываем событие
+    if (ghSvcStopEvent) {
+        CloseHandle(ghSvcStopEvent);
+        ghSvcStopEvent = NULL;
+    }
+    // Сигнал остановки получен, завершаем работу.
+    //WriteLog("SvcInit: Завершение работы");
+    ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
+}
+// ===== ПРОВЕРКА ПРАВ АДМИНИСТРАТОРА =====
+bool IsRunningAsAdmin() {
+    BOOL isAdmin = FALSE;
+    PSID adminGroup = NULL;
+    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+
+    if (AllocateAndInitializeSid(&ntAuthority, 2,
+        SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_ADMINS,
+        0, 0, 0, 0, 0, 0, &adminGroup)) {
+        CheckTokenMembership(NULL, adminGroup, &isAdmin);
+        FreeSid(adminGroup);
     }
 
-    // Сигнал остановки получен, завершаем работу.
-    WriteLog("SvcInit: Завершение работы");
-    ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
+    return isAdmin != FALSE;
 }
 
 // --- Обработчик команд от SCM ---
 VOID WINAPI SvcCtrlHandler(DWORD dwCtrl)
 {
-    WriteLog("SvcCtrlHandler: Получена команда %d", dwCtrl);
+    //WriteLog("SvcCtrlHandler: Получена команда %d", dwCtrl);
 
     switch (dwCtrl)
     {
     case SERVICE_CONTROL_STOP:
-        WriteLog("SvcCtrlHandler: Команда STOP");
         ReportSvcStatus(SERVICE_STOP_PENDING, NO_ERROR, 0);
-        SetEvent(ghSvcStopEvent);
-        // Не вызываем ReportSvcStatus здесь - SvcInit сам сообщит о остановке
+
+        // ===== СИГНАЛИМ О ОСТАНОВКЕ =====
+        if (ghSvcStopEvent) {
+            SetEvent(ghSvcStopEvent);
+        }
         break;
 
     case SERVICE_CONTROL_INTERROGATE:
-        WriteLog("SvcCtrlHandler: Команда INTERROGATE");
+        //WriteLog("SvcCtrlHandler: Команда INTERROGATE");
         break;
 
     case SERVICE_CONTROL_PAUSE:
-        WriteLog("SvcCtrlHandler: Команда PAUSE");
+        //WriteLog("SvcCtrlHandler: Команда PAUSE");
         // Здесь можно приостановить работу
         break;
 
     case SERVICE_CONTROL_CONTINUE:
-        WriteLog("SvcCtrlHandler: Команда CONTINUE");
+        //WriteLog("SvcCtrlHandler: Команда CONTINUE");
         // Здесь можно возобновить работу
         break;
 
     default:
-        WriteLog("SvcCtrlHandler: Неизвестная команда %d", dwCtrl);
+        //WriteLog("SvcCtrlHandler: Неизвестная команда %d", dwCtrl);
         break;
     }
 }
 
-// --- УСТАНОВКА СЛУЖБЫ (ДОБАВЛЕНА) ---
 VOID SvcInstall()
 {
     SC_HANDLE schSCManager;
     SC_HANDLE schService;
     wchar_t szPath[MAX_PATH];
 
-    WriteLog("SvcInstall: Начало установки");
+    //WriteLog("SvcInstall: Начало установки");
+
+    // Проверяем права
+    if (!IsRunningAsAdmin()) {
+        printf("Error: Administrator rights required!\n");
+        printf("Run the program as Administrator.\n");
+        return;
+    }
 
     // Получаем полный путь к .exe файлу
     if (!GetModuleFileNameW(NULL, szPath, MAX_PATH))
     {
         DWORD dwError = GetLastError();
-        WriteLog("SvcInstall: Ошибка GetModuleFileName: %d", dwError);
+        //WriteLog("SvcInstall: Ошибка GetModuleFileName: %d", dwError);
         printf("Не удалось получить путь к исполняемому файлу (%d)\n", dwError);
         return;
     }
-    WriteLog("SvcInstall: Путь к файлу: %S", szPath);
+    //WriteLog("SvcInstall: Путь к файлу: %S", szPath);
 
     // Открываем диспетчер управления службами
     schSCManager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CREATE_SERVICE);
     if (NULL == schSCManager)
     {
         DWORD dwError = GetLastError();
-        WriteLog("SvcInstall: Ошибка OpenSCManager: %d", dwError);
-        printf("OpenSCManager не удался (%d)\n", dwError);
+        //WriteLog("SvcInstall: Ошибка OpenSCManager: %d", dwError);
+
+        // ===== ПОДРОБНЫЕ СООБЩЕНИЯ ОБ ОШИБКАХ =====
+        switch (dwError) {
+        case ERROR_ACCESS_DENIED:  // 5
+            printf("Error: You dont go forward (type 5)\n");
+            printf("You arent Administrator\n");
+            break;
+        case ERROR_NOT_ENOUGH_MEMORY:  // 8
+            printf("Error: Memory small\n");
+            break;
+        case ERROR_INVALID_HANDLE:  // 6
+            printf("Error: Bad descriptor\n");
+            break;
+        default:
+            printf("OpenSCManager error(%d)\n", dwError);
+            break;
+        }
         return;
     }
 
     // Создаём службу
     schService = CreateServiceW(
-        schSCManager,              // Дескриптор SCM
-        g_szServiceName,           // Внутреннее имя службы
-        g_szServiceDisplayName,    // Отображаемое имя
-        SERVICE_ALL_ACCESS,        // Права доступа
-        SERVICE_WIN32_OWN_PROCESS, // Тип службы (свой процесс)
-        SERVICE_AUTO_START,        // ТИП ЗАПУСКА: АВТОМАТИЧЕСКИЙ
-        SERVICE_ERROR_NORMAL,      // Тип контроля ошибок
-        szPath,                    // Путь к .exe
-        NULL,                      // Группа загрузки
-        NULL,                      // Тег
-        NULL,                      // Зависимости
-        NULL,                      // Учётная запись (LocalSystem)
-        NULL);                     // Пароль
+        schSCManager,
+        g_szServiceName,
+        g_szServiceDisplayName,
+        SERVICE_ALL_ACCESS,
+        SERVICE_WIN32_OWN_PROCESS,
+        SERVICE_AUTO_START,
+        SERVICE_ERROR_NORMAL,
+        szPath,
+        NULL, NULL, NULL,
+        NULL,  // LocalSystem
+        NULL);
 
     if (schService == NULL)
     {
         DWORD dwError = GetLastError();
-        WriteLog("SvcInstall: Ошибка CreateService: %d", dwError);
-        printf("CreateService не удался (%d)\n", dwError);
+        //WriteLog("SvcInstall: Ошибка CreateService: %d", dwError);
 
-        if (dwError == ERROR_SERVICE_EXISTS) {
-            printf("Служба уже существует!\n");
+        switch (dwError) {
+        case ERROR_SERVICE_EXISTS:  // 1073
+            printf("Service already exists!\n");
+            printf("To reinstall, first uninstall it: %S uninstall\n", g_szServiceName);
+            break;
+        case ERROR_ACCESS_DENIED:  // 5
+            printf("ERROR: Access denied when creating service (code 5)\n");
+            printf("Run this program as Administrator!\n");
+            break;
+        case ERROR_PATH_NOT_FOUND:  // 3
+            printf("ERROR: File path not found\n");
+            printf("Make sure the executable exists at the specified path.\n");
+            break;
+        default:
+            printf("CreateService failed (%d)\n", dwError);
+            break;
         }
     }
     else
     {
-        printf("Служба успешно установлена!\n");
-        WriteLog("SvcInstall: Служба успешно установлена");
-
-        // ===== ОПЦИОНАЛЬНО: Включить отложенный запуск =====
-        // Для отложенного запуска раскомментируйте:
-        /*
-        HKEY hKey;
-        wchar_t keyPath[256];
-        wsprintfW(keyPath, L"SYSTEM\\CurrentControlSet\\Services\\%s", g_szServiceName);
-        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, keyPath, 0, KEY_WRITE, &hKey) == ERROR_SUCCESS)
-        {
-            DWORD delayedStart = 1;
-            RegSetValueExW(hKey, L"DelayedAutoStart", 0, REG_DWORD,
-                          (const BYTE*)&delayedStart, sizeof(DWORD));
-            RegCloseKey(hKey);
-            printf("Включен отложенный автозапуск\n");
-        }
-        */
+        printf("Service was installed\n");
+        printf("Service name: %S\n", g_szServiceName);
+        printf("\nFor start Service:\n");
+        printf("  net start %S\n", g_szServiceName);
+        printf("\nfor stop Service:\n");
+        printf("  net stop %S\n", g_szServiceName);
+        //WriteLog("SvcInstall: Служба успешно установлена");
 
         CloseServiceHandle(schService);
     }
 
     CloseServiceHandle(schSCManager);
-    WriteLog("SvcInstall: Завершение установки");
+    //WriteLog("SvcInstall: Завершение установки");
 }
 
-// --- УДАЛЕНИЕ СЛУЖБЫ (ДОБАВЛЕНА) ---
 VOID SvcUninstall()
 {
     SC_HANDLE schSCManager;
     SC_HANDLE schService;
 
-    WriteLog("SvcUninstall: Начало удаления");
+    //WriteLog("SvcUninstall: Начало удаления");
 
-    // Открываем диспетчер управления службами
+    // Проверяем права
+    if (!IsRunningAsAdmin()) {
+        printf("Error: Administrator rights required!\n");
+        return;
+    }
+
     schSCManager = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
     if (NULL == schSCManager)
     {
         DWORD dwError = GetLastError();
-        WriteLog("SvcUninstall: Ошибка OpenSCManager: %d", dwError);
+        //WriteLog("SvcUninstall: Ошибка OpenSCManager: %d", dwError);
         printf("OpenSCManager не удался (%d)\n", dwError);
         return;
     }
 
-    // Открываем службу
     schService = OpenServiceW(schSCManager, g_szServiceName, SERVICE_ALL_ACCESS);
     if (schService == NULL)
     {
         DWORD dwError = GetLastError();
-        WriteLog("SvcUninstall: Ошибка OpenService: %d", dwError);
-        printf("OpenService не удался (%d)\n", dwError);
+        //WriteLog("SvcUninstall: Ошибка OpenService: %d", dwError);
 
         if (dwError == ERROR_SERVICE_DOES_NOT_EXIST) {
-            printf("Служба не найдена!\n");
+            printf("Service %S wasnt installed!\n", g_szServiceName);
+        }
+        else {
+            printf("OpenService не удался (%d)\n", dwError);
         }
 
         CloseServiceHandle(schSCManager);
         return;
     }
 
-    // Останавливаем службу, если она запущена
+    // Останавливаем службу
     SERVICE_STATUS svcStatus;
     if (ControlService(schService, SERVICE_CONTROL_STOP, &svcStatus))
     {
-        WriteLog("SvcUninstall: Служба остановлена");
+        //WriteLog("SvcUninstall: Служба остановлена");
         printf("Служба остановлена\n");
-        Sleep(2000); // Даём время на остановку
+        Sleep(2000);
     }
     else
     {
-        WriteLog("SvcUninstall: Служба уже остановлена или недоступна");
+        //WriteLog("SvcUninstall: Служба уже остановлена или недоступна");
     }
 
     // Удаляем службу
     if (!DeleteService(schService))
     {
         DWORD dwError = GetLastError();
-        WriteLog("SvcUninstall: Ошибка DeleteService: %d", dwError);
+        //WriteLog("SvcUninstall: Ошибка DeleteService: %d", dwError);
         printf("DeleteService не удался (%d)\n", dwError);
     }
     else
     {
-        WriteLog("SvcUninstall: Служба успешно удалена");
-        printf("Служба успешно удалена!\n");
+        //WriteLog("SvcUninstall: Служба успешно удалена");
+        printf("Service %S is deleted sucsessfull\n", g_szServiceName);
     }
 
     CloseServiceHandle(schService);
     CloseServiceHandle(schSCManager);
-    WriteLog("SvcUninstall: Завершение удаления");
+    //WriteLog("SvcUninstall: Завершение удаления");
 }
 
 // --- Вспомогательная функция для отправки статуса в SCM ---

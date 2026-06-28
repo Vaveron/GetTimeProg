@@ -10,9 +10,16 @@
 #include <fcntl.h>
 #include <io.h>
 #include <set>
+#include <windows.h>
+#include <tchar.h>
+#include <strsafe.h>
+#pragma comment(lib, "advapi32.lib")
+#include <mutex>
 
 // ===== КОНСТРУКТОР =====
-MainF::MainF() {
+MainF::MainF(HANDLE hStopEvent)
+    : hStopEvent(hStopEvent) {
+	this->hStopEvent = hStopEvent;
     // Загружаем данные из файла
     ReadFile();
 
@@ -30,11 +37,9 @@ MainF::~MainF() {
 
 // ===== ЗАПИСЬ В ФАЙЛ =====
 void MainF::WriteFile() {
-    std::lock_guard<std::mutex> lock(dataMutex);
-
+    std::lock_guard<std::recursive_mutex> lock(dataMutex);
     std::string filePath = GetExePath() + "processes.txt";
     std::ofstream file(filePath);
-
     if (!file.is_open()) {
         file.open("processes.txt");
         if (!file.is_open()) {
@@ -88,28 +93,24 @@ void MainF::WriteFile() {
 
 // ===== ЧТЕНИЕ ИЗ ФАЙЛА =====
 void MainF::ReadFile() {
-    std::lock_guard<std::mutex> lock(dataMutex);
+    
+    std::lock_guard<std::recursive_mutex> lock(dataMutex);
 
     std::string filePath = GetExePath() + "processes.txt";
     std::ifstream file(filePath);
-
     if (!file.is_open()) {
         file.open("processes.txt");
         if (!file.is_open()) {
             processes.clear();
-            AddProcess("Telegram.exe");
-            AddProcess("firefox.exe");
-            AddProcess("Spotify.exe");
+            AddProcess("Example.exe");
             WriteFile();
             return;
         }
     }
-
     processes.clear();
 
     std::string line;
     bool readingProcesses = false;
-
     while (std::getline(file, line)) {
         size_t start = line.find_first_not_of(" \t\r\n");
         if (start == std::string::npos) continue;
@@ -320,17 +321,27 @@ std::string MainF::GetExePath() {
     return ".\\";
 }
 
-// ===== BSTR В UTF-8 =====
 std::string MainF::BstrToUtf8(BSTR bstr) {
     if (!bstr) return "";
+
     int size_needed = WideCharToMultiByte(CP_UTF8, 0, bstr, -1, NULL, 0, NULL, NULL);
     if (size_needed <= 0) return "";
-    std::string strTo(size_needed - 1, 0);
-    WideCharToMultiByte(CP_UTF8, 0, bstr, -1, &strTo[0], size_needed, NULL, NULL);
+
+    std::string strTo;
+    strTo.resize(size_needed);
+
+    int result = WideCharToMultiByte(CP_UTF8, 0, bstr, -1, &strTo[0], size_needed, NULL, NULL);
+    if (result <= 0) return "";
+
+    // Убираем лишний нуль-терминатор
+    while (!strTo.empty() && strTo.back() == '\0') {
+        strTo.pop_back();
+    }
+
     return strTo;
 }
 
-// ===== ПОИСК ВСЕХ ЗАПУЩЕННЫХ ПРОЦЕССОВ =====
+// ===== ПОИСК ВСЕХ ЗАПУЩЕННЫХ ПРОЦЕССОВ ===== Подзабыл где это вообще используеться
 std::vector<std::pair<DWORD, std::string>> MainF::GetAllRunningProcesses() {
     std::vector<std::pair<DWORD, std::string>> result;
 
@@ -542,7 +553,7 @@ void MainF::StartWMIMonitoring() {
     }
 
     auto runningProcesses = GetAllRunningProcesses();
-    /*
+    /* Не удобная штука для debug полминуты выводит все процессы
     // ===== ПОКАЗЫВАЕМ ВСЕ ЗАПУЩЕННЫЕ ПРОЦЕССЫ =====
     std::cout << "\n=== All of Processes that are active ===" << std::endl;
     for (const auto& [pid, name] : runningProcesses) {
@@ -591,33 +602,16 @@ void MainF::StartWMIMonitoring() {
     }
     std::cout << std::endl;
 
-    // Теперь добавляем главные процессы в отслеживание
-    for (const auto& [name, pids] : mainPidsByName) {
-        for (DWORD pid : pids) {
-            // Ищем процесс в processes
-            for (auto& proc : processes) {
-                if (proc.name == name) {
-                    auto startTime = GetProcessStartTime(pid);
-                    processStartTimes[pid] = startTime;
-                    processNames[pid] = name;
-                    processPids[pid] = name;  // Сохраняем соответствие PID -> имя
-
-                    std::cout << "[+] Main process already running: " << name
-                        << " (PID: " << pid
-                        << ", Total time: " << FormatProcessTime(proc.totalTime) << ")" << std::endl;
-                    break;
-                }
-            }
-        }
-    }
-    std::cout << std::endl;
-
     std::cout << "WMI was started. Waiting event..." << std::endl;
 
     IWbemClassObject* pEventObj = NULL;
     ULONG uReturn = 0;
 
     while (true) {
+        //Для остановки службы 
+        if (hStopEvent && WaitForSingleObject(hStopEvent, 0) == WAIT_OBJECT_0) {
+            break;
+        }
         // ============================================================
         // 1. ОБРАБОТКА ЗАПУСКА ПРОЦЕССА
         // ============================================================

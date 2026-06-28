@@ -12,7 +12,6 @@
 #include <iomanip>
 #include <map>
 #include <mutex>
-
 struct Process {
     std::string name;
     float totalTime = 0.0f;  // Общее время работы за все сессии
@@ -20,9 +19,9 @@ struct Process {
 
 class MainF {
 public:
-    MainF();
+    MainF(HANDLE hStopEvent);
     ~MainF();
-
+    HANDLE hStopEvent;
     // Основные функции
     void WriteFile();
     void ReadFile();
@@ -39,15 +38,13 @@ public:
     long long ParseTimeString(const std::string& timeStr);
     std::string BstrToUtf8(BSTR bstr);
 
-    // Геттеры
-    const std::vector<Process>& GetProcesses() const { return processes; }
-
-private:
+    // Все вектора и мапы для сохранени  служб
     std::vector<Process> processes;
     std::map<DWORD, std::chrono::steady_clock::time_point> processStartTimes;
     std::map<DWORD, std::string> processNames;
     std::map<DWORD, std::string> processPids;
-    std::mutex dataMutex;
+
+    std::recursive_mutex dataMutex; //блокарь потока для чтения и записи файлов
 
     void StartWMIMonitoring();
     std::chrono::steady_clock::time_point GetProcessStartTime(DWORD pid);
@@ -55,4 +52,5 @@ private:
     DWORD GetParentProcessId(DWORD pid);
     std::string GetProcessNameByPid(DWORD pid);
     bool IsMainProcess(DWORD pid, const std::string& processName);
+
 };
